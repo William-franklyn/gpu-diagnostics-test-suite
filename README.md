@@ -271,6 +271,7 @@ The four checks above only use two calls out of the dozens NVIDIA exposes in [NV
 | [`lib/store.js`](lib/store.js) | Redis read/write helpers, and the deploy-key check |
 | [`engine/diag.cu`](engine/diag.cu) | **The diagnostic engine:** C++/CUDA, NVML health checks, CUDA memory and compute kernels |
 | [`gpu_diagnostics_cpp.ipynb`](gpu_diagnostics_cpp.ipynb) | The Colab notebook: writes the engine, compiles it, runs it on a real GPU, and talks to the website |
+| [`training/gemma_lora_training.ipynb`](training/gemma_lora_training.ipynb) | The AI training notebook: makes the 400 examples, fine-tunes Gemma 2 2B with LoRA on a T4, and saves the adapter |
 | [`docs/architecture.svg`](docs/architecture.svg) | The architecture diagram |
 
 ## Set up (once)
