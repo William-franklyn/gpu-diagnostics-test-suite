@@ -63,10 +63,13 @@ bool testTemperature() {
 
 bool testFan() {
     unsigned int speed = 0;
-    nvmlDeviceGetFanSpeed(gpu, &speed);   // stays 0 if the GPU has no fan sensor
+    nvmlReturn_t result = nvmlDeviceGetFanSpeed(gpu, &speed);
 
     if (injectFault == true) {
         speed = 150;           // fault: impossible speed
+    } else if (result != NVML_SUCCESS) {
+        cout << "   ERROR: could not read fan speed (this GPU may have no fan)" << endl;
+        return false;
     }
 
     cout << "   fan speed: " << speed << "%" << endl;
