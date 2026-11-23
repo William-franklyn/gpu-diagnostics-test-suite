@@ -805,4 +805,192 @@ function rcaToHtml(text) {
 }
 
 function renderExplain() {
-  const btn = document
+  const btn = document.getElementById("rca-btn");
+  const body = document.getElementById("rca-body");
+  const online = colabOnline();
+
+  if (!results) {
+    btn.disabled = true;
+    body.innerHTML = '<p class="rca-state">Run the diagnostics first, then the AI can explain them.</p>';
+    return;
+  }
+
+  const ex = explain || { state: "idle" };
+  const busy = ex.state === "requested" || ex.state === "running";
+  const forThisRun = ex.runNumber === results.runNumber;
+  btn.disabled = busy;
+
+  if (ex.state === "requested") {
+    body.innerHTML = '<p class="rca-state"><span class="dot busy"></span>' +
+      (online ? "Asked Colab. The AI will start in a few seconds."
+              : "Waiting for Colab to start listening.") + '</p>';
+  } else if (ex.state === "running") {
+    body.innerHTML = '<p class="rca-state"><span class="dot busy"></span>' +
+      "The AI is writing the analysis on the GPU. The first time takes a minute or two.</p>";
+  } else if (ex.state === "error") {
+    body.innerHTML = '<p class="rca-error">The AI couldn\'t finish: ' + esc(ex.error) + '</p>';
+  } else if (ex.state === "done" && ex.text) {
+    body.innerHTML =
+      '<p class="rca-state">' + (forThisRun ? "Analysis for run #" : "Older analysis, for run #") +
+      esc(ex.runNumber) + (ex.finishedAt ? ", written " + esc(formatTime(ex.finishedAt)) : "") +
+      (forThisRun ? "" : ". Click the button to explain the latest run.") + '</p>' +
+      '<div class="rca-text">' + rcaToHtml(ex.text) + '</div>';
+  } else {
+    body.innerHTML = '<p class="rca-state">' +
+      (online ? "Click the button and the AI will explain the latest run."
+              : "Colab needs to be listening for the AI to run.") + '</p>';
+  }
+}
+
+async function requestExplain() {
+  try {
+    const r = await fetch("/api/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "request" })
+    });
+    if (r.ok) explain = await r.json();
+  } catch (e) {}
+  renderExplain();
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(refresh, 3000);
+}
+document.getElementById("rca-btn").addEventListener("click", requestExplain);
+
+
+// ---------- History graph ----------
+
+// Finds the temperature number in the temp test's lines (for example "48 C")
+function tempFromEntry(entry) {
+  for (const gpu of entry.gpus || []) {
+    for (const t of gpu.tests || []) {
+      if (t.name === "temp") {
+        const m = (t.details || []).join(" ").match(/(-?\d+(?:\.\d+)?)\s*°?\s*C\b/);
+        if (m) return parseFloat(m[1]);
+      }
+    }
+  }
+  return null;
+}
+
+async function loadHistory() {
+  const note = document.getElementById("history-note");
+  try {
+    if (typeof Chart === "undefined") throw new Error("Chart library didn't load");
+    const r = await fetch("/api/history", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const history = await r.json();
+
+    if (history.length === 0) {
+      note.textContent = "No history yet. It starts filling from the next run.";
+      return;
+    }
+
+    const labels = history.map(function (h) {
+      return "#" + h.runNumber + " " + new Date(h.receivedAt).toLocaleDateString();
+    });
+    const temps = history.map(tempFromEntry);
+    const passed = history.map(function (h) { return h.passed; });
+
+    const css = getComputedStyle(document.documentElement);
+    const green = css.getPropertyValue("--pass").trim();
+    const amber = css.getPropertyValue("--busy").trim();
+    const muted = css.getPropertyValue("--muted").trim();
+    const line = css.getPropertyValue("--line").trim();
+
+    const data = {
+      labels: labels,
+      datasets: [
+        { label: "Temperature (°C)", data: temps, borderColor: amber, backgroundColor: amber,
+          yAxisID: "yTemp", tension: 0.25, spanGaps: true },
+        { label: "Checks passed", data: passed, borderColor: green, backgroundColor: green,
+          yAxisID: "yPass", stepped: true }
+      ]
+    };
+
+    if (historyChart) {
+      historyChart.data = data;
+      historyChart.update();
+    } else {
+      historyChart = new Chart(document.getElementById("history-chart"), {
+        type: "line",
+        data: data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { labels: { color: muted } } },
+          scales: {
+            x: { ticks: { color: muted, maxTicksLimit: 8 }, grid: { color: line } },
+            yTemp: { position: "left", title: { display: true, text: "°C", color: muted },
+                     ticks: { color: muted }, grid: { color: line } },
+            yPass: { position: "right", beginAtZero: true, title: { display: true, text: "Passed", color: muted },
+                     ticks: { color: muted, precision: 0 }, grid: { display: false } }
+          }
+        }
+      });
+    }
+    note.textContent = history.length + " runs saved. Only normal runs are graphed, since fault runs are fake on purpose.";
+  } catch (e) {
+    note.textContent = "Couldn't load history: " + e.message;
+  }
+}
+
+
+// ---------- Keeping the page up to date ----------
+async function loadResults() {
+  const r = await fetch("/api/results", { cache: "no-store" });
+  if (r.status === 404) { results = null; return; }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  results = await r.json();
+}
+
+async function loadExplain() {
+  try {
+    const r = await fetch("/api/explain", { cache: "no-store" });
+    if (r.ok) explain = await r.json();
+  } catch (e) {}
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    status = await r.json();
+  } catch (e) {
+    status = null;
+  }
+
+  // New results arrived (or first load): fetch and redraw them
+  const runAt = status ? status.lastRunAt : null;
+  let isNew = false;
+  if (runAt !== shownRunAt) {
+    try {
+      await loadResults();
+      isNew = shownRunAt !== undefined;   // not on the first page load
+      shownRunAt = runAt;
+      renderResults();
+      loadHistory();
+    } catch (e) {}
+  }
+  renderStatus();
+  await loadExplain();
+  renderExplain();
+  if (isNew) {
+    const box = document.getElementById("status");
+    box.classList.remove("flash");
+    void box.offsetWidth;                 // restart the highlight
+    box.classList.add("flash");
+  }
+
+  // Check often while something is happening, less often otherwise
+  clearTimeout(pollTimer);
+  const busy = (status && status.state !== "idle") ||
+               (explain && (explain.state === "requested" || explain.state === "running"));
+  pollTimer = setTimeout(refresh, busy ? 4000 : 10000);
+}
+
+refresh();
+</script>
+</body>
+</html>
