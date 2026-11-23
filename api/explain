@@ -1,0 +1,71 @@
+// GET  /api/explain -> the current AI explanation (anyone can view)
+// POST /api/explain {action:"request"} -> ask Colab for Root Cause Analysis (anyone)
+// POST /api/explain {action:"claim"}   -> Colab checks for a request (needs deploy key)
+// POST /api/explain {action:"answer"}  -> Colab sends the answer back (needs deploy key)
+
+import { load, save, keyIsRight, send } from "../lib/store.js";
+
+const EMPTY = { state: "idle", runNumber: null, text: "", error: "", requestedAt: null, finishedAt: null };
+const STUCK_MINUTES = 10; // if Colab never answers, allow a new request after this
+
+export default async function handler(req, res) {
+  try {
+    const ex = await load("explain", EMPTY);
+
+    if (req.method === "GET") {
+      return send(res, 200, ex);
+    }
+    if (req.method !== "POST") {
+      return send(res, 405, { error: "Use GET or POST" });
+    }
+
+    const body = req.body || {};
+    const now = new Date().toISOString();
+
+    if (body.action === "request") {
+      const results = await load("results", null);
+      if (results === null) {
+        return send(res, 400, { error: "No results yet" });
+      }
+      const busy = ex.state === "requested" || ex.state === "running";
+      const stuck = busy && (Date.now() - new Date(ex.requestedAt)) / 60000 > STUCK_MINUTES;
+      if (busy && !stuck) {
+        return send(res, 200, ex);
+      }
+      if (ex.state === "done" && ex.runNumber === results.runNumber) {
+        return send(res, 200, ex); // already explained this run
+      }
+      const next = { state: "requested", runNumber: results.runNumber, text: "", error: "",
+                     requestedAt: now, finishedAt: null };
+      await save("explain", next);
+      return send(res, 200, next);
+    }
+
+    if (!keyIsRight(req)) {
+      return send(res, 401, { error: "Wrong deploy key" });
+    }
+
+    if (body.action === "claim") {
+      if (ex.state !== "requested") {
+        return send(res, 200, { explain: false });
+      }
+      ex.state = "running";
+      await save("explain", ex);
+      return send(res, 200, { explain: true, runNumber: ex.runNumber });
+    }
+
+    if (body.action === "answer") {
+      ex.error = String(body.error || "");
+      ex.text = String(body.text || "").slice(0, 8000);
+      ex.state = ex.error ? "error" : "done";
+      ex.finishedAt = now;
+      if (body.runNumber != null) ex.runNumber = body.runNumber;
+      await save("explain", ex);
+      return send(res, 200, { ok: true });
+    }
+
+    return send(res, 400, { error: "Unknown action" });
+  } catch (err) {
+    return send(res, 500, { error: err.message });
+  }
+}
