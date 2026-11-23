@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GPU Diagnostics Test Suite — System Health Monitor</title>
+<title>GPU Diagnostics Test Suite: System Health Monitor</title>
 <meta name="description" content="Live hardware integrity monitor for a C++/CUDA GPU diagnostics test suite: health checks, memory pattern test, compute check and fault injection, streamed from a real NVIDIA GPU.">
 <meta name="theme-color" content="#05080a">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='7' y='7' width='10' height='10' rx='1.5' fill='none' stroke='%2300e58a' stroke-width='1.8'/%3E%3Cpath d='M9 2v3M12 2v3M15 2v3M9 19v3M12 19v3M15 19v3M2 9h3M2 12h3M2 15h3M19 9h3M19 12h3M19 15h3' stroke='%2300e58a' stroke-width='1.8' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='12' r='2' fill='%2300e58a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
   --bg: #eef2f2;
@@ -342,6 +343,34 @@ h1 {
 .badge.pass { background: var(--pass-soft); color: var(--pass); border-color: var(--pass); }
 .badge.fail { background: var(--fail-soft); color: var(--fail); border-color: var(--fail); }
 
+/* Root Cause Analysis with AI */
+section.rca { padding: 40px 0 0; }
+.rca-box {
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.rca-top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; }
+.rca-top p { margin: 0; color: var(--muted); font-size: 14px; max-width: 60ch; }
+.rca-state { margin: 14px 0 0; display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 14px; color: var(--muted); }
+.rca-text { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 6px; }
+.rca-text h4 { font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--pass); margin: 14px 0 6px; }
+.rca-text p { margin: 0 0 10px; }
+.rca-error { color: var(--fail); font-family: var(--font-mono); font-size: 13px; }
+
+/* History graph */
+section.history { padding: 40px 0 0; }
+.chart-box {
+  position: relative;
+  height: 280px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.history-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; font-family: var(--font-mono); }
+
 /* How it works */
 section.how { padding: 52px 0 24px; }
 section.how h2 { font-family: var(--font-mono); font-weight: 700; font-size: 22px; margin: 0 0 20px; letter-spacing: -0.01em; }
@@ -413,7 +442,7 @@ footer a { color: var(--ink); font-weight: 600; }
   <header>
     <p class="topline"><span class="prompt">root@gpu:~$</span> tail -f /var/log/health.log <span class="cursor" aria-hidden="true"></span></p>
     <h1>GPU Diagnostics Test Suite</h1>
-    <p class="tagline">A live hardware integrity monitor for a C++/CUDA diagnostic tool — health checks, a memory torture test, a compute check, and a fault-injection run, streamed straight from a real NVIDIA GPU.</p>
+    <p class="tagline">A live hardware integrity monitor for a C++/CUDA diagnostic tool, with health checks, a memory torture test, a compute check, a fault-injection run, and Root Cause Analysis by a fine-tuned AI model, streamed straight from a real NVIDIA GPU.</p>
     <div class="pulse-line" aria-hidden="true">
       <svg viewBox="0 0 1200 60" preserveAspectRatio="none">
         <g class="pulse-track">
@@ -428,13 +457,31 @@ footer a { color: var(--ink); font-weight: 600; }
     <div id="switch"></div>
   </header>
   <main id="results"></main>
+
+  <section class="rca">
+    <p class="section-label">Root Cause Analysis with AI</p>
+    <div class="rca-box" id="rca" aria-live="polite">
+      <div class="rca-top">
+        <p>A Gemma 2 model, fine-tuned with LoRA on GPU diagnostic results, explains in plain language why each check passed or failed.</p>
+        <button type="button" class="run-btn" id="rca-btn">Root Cause Analysis with AI</button>
+      </div>
+      <div id="rca-body"></div>
+    </div>
+  </section>
+
+  <section class="history">
+    <p class="section-label">Performance over time</p>
+    <div class="chart-box"><canvas id="history-chart"></canvas></div>
+    <p class="history-note" id="history-note">Loading history…</p>
+  </section>
+
   <section class="how">
     <h2>// How it works</h2>
     <ol class="flow">
       <li><strong>C++ engine</strong>One program, written in C++ and CUDA, runs every check.</li>
       <li><strong>Health checks</strong>NVIDIA's NVML library reports temperature and fan speed.</li>
       <li><strong>GPU workloads</strong>CUDA kernels run on thousands of GPU threads to test memory and compute.</li>
-      <li><strong>This page</strong>Colab sends the results here. Run again asks Colab to test the GPU once more.</li>
+      <li><strong>This page</strong>Colab sends the results here. Run again asks Colab to test the GPU once more, and Root Cause Analysis asks the AI model to explain them.</li>
     </ol>
     <div id="output"></div>
   </section>
@@ -456,11 +503,13 @@ const ONLINE_SECONDS = 30;  // Colab counts as listening if it checked in this r
 
 let results = null;         // latest results from /api/results
 let status = null;          // latest status from /api/status
+let explain = null;         // latest AI explanation from /api/explain
 let shownRunAt = undefined; // lastRunAt of the results on screen
 let current = "healthy";    // which run is shown: healthy or fault
 let askingForKey = false;
 let keyError = "";
 let pollTimer = null;
+let historyChart = null;
 
 
 // ---------- Small helpers ----------
@@ -497,7 +546,6 @@ function timeAgo(iso) {
   return Math.round(s / 86400) + " days ago";
 }
 
-
 // Exact time in the viewer's own time zone, with seconds
 function formatTime(iso) {
   if (!iso) return "";
@@ -505,6 +553,10 @@ function formatTime(iso) {
     month: "short", day: "numeric", year: "numeric",
     hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short"
   });
+}
+
+function colabOnline() {
+  return status && secondsAgo(status.lastSeen) < ONLINE_SECONDS;
 }
 
 // ---------- Status panel ----------
@@ -516,7 +568,7 @@ function renderStatus() {
     return;
   }
 
-  const online = secondsAgo(status.lastSeen) < ONLINE_SECONDS;
+  const online = colabOnline();
   let dot = "idle";
   let head = "Waiting for a run";
   let sub = "";
@@ -735,49 +787,22 @@ function renderResults() {
 }
 
 
-// ---------- Keeping the page up to date ----------
-async function loadResults() {
-  const r = await fetch("/api/results", { cache: "no-store" });
-  if (r.status === 404) { results = null; return; }
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  results = await r.json();
+// ---------- Root Cause Analysis with AI ----------
+
+// Turns the model's text into simple HTML: "## " lines become headings, blank lines split paragraphs
+function rcaToHtml(text) {
+  let html = "";
+  for (const block of String(text).split(/\n\s*\n/)) {
+    const b = block.trim();
+    if (!b) continue;
+    if (b.startsWith("## ")) {
+      html += "<h4>" + esc(b.slice(3)) + "</h4>";
+    } else {
+      html += "<p>" + esc(b).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>") + "</p>";
+    }
+  }
+  return html;
 }
 
-async function refresh() {
-  try {
-    const r = await fetch("/api/status", { cache: "no-store" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    status = await r.json();
-  } catch (e) {
-    status = null;
-  }
-
-  // New results arrived (or first load): fetch and redraw them
-  const runAt = status ? status.lastRunAt : null;
-  let isNew = false;
-  if (runAt !== shownRunAt) {
-    try {
-      await loadResults();
-      isNew = shownRunAt !== undefined;   // not on the first page load
-      shownRunAt = runAt;
-      renderResults();
-    } catch (e) {}
-  }
-  renderStatus();
-  if (isNew) {
-    const box = document.getElementById("status");
-    box.classList.remove("flash");
-    void box.offsetWidth;                 // restart the highlight
-    box.classList.add("flash");
-  }
-
-  // Check often while a run is happening, less often otherwise
-  clearTimeout(pollTimer);
-  const busy = status && status.state !== "idle";
-  pollTimer = setTimeout(refresh, busy ? 4000 : 10000);
-}
-
-refresh();
-</script>
-</body>
-</html>
+function renderExplain() {
+  const btn = document
